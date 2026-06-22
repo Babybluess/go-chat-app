@@ -38,6 +38,53 @@
     const status   = document.getElementById('status')
     const input    = document.getElementById('input')
 
+    let roomName = ''
+    let userName = ''
+
+    let ws            = null
+    let retryCount    = 0
+    const BASE_DELAY  = 1000   
+    const MAX_DELAY   = 30000 
+
+    function backoffDelay() {
+      const exp    = Math.min(retryCount, 10)       
+      const delay  = BASE_DELAY * Math.pow(2, exp)
+      const jitter = delay * 0.2 * (Math.random() - 0.5)
+      return Math.min(delay + jitter, MAX_DELAY)
+    }
+
+    function connect() {
+      ws = new WebSocket(`ws://${location.host}/ws`)
+
+      ws.onopen = () => {
+        retryCount = 0   
+        status.textContent = '● Connected'
+        status.style.color = '#1D9E75'
+        addMessage('Connected to chat', 'system')
+
+        if (roomName) ws.send(`Room name: ${roomName}`)
+        if (userName) ws.send(`Name: ${userName}`)
+      }
+
+      ws.onmessage = (e) => {
+        e.data.split('\n').filter(Boolean).forEach(line => addMessage(line))
+      }
+
+      ws.onclose = () => {
+        status.style.color = '#E24B4A'
+        const delay = backoffDelay()
+        const secs  = (delay / 1000).toFixed(1)
+        status.textContent = `○ Disconnected — retrying in ${secs}s`
+        addMessage(`Disconnected. Reconnecting in ${secs}s…`, 'system')
+        retryCount++
+        setTimeout(connect, delay) 
+      }
+
+      ws.onerror = () => {
+        addMessage('WebSocket error', 'system')
+      }
+    }
+
     function addMessage(text, type = 'chat') {
       const div = document.createElement('div')
       div.className = `msg ${type}`
@@ -46,33 +93,12 @@
       messages.scrollTop = messages.scrollHeight
     }
 
-    const ws = new WebSocket(`ws://${location.host}/ws`)
-
-    ws.onopen = () => {
-      status.textContent = '● Connected'
-      status.style.color = '#1D9E75'
-      addMessage('Connected to chat', 'system')
-    }
-
-    ws.onmessage = (e) => {
-      e.data.split('\n').filter(Boolean).forEach(line => addMessage(line))
-    }
-
-    ws.onclose = () => {
-      status.textContent = '○ Disconnected'
-      status.style.color = '#E24B4A'
-      addMessage('Disconnected from chat', 'system')
-    }
-
-    ws.onerror = (err) => {
-      addMessage(`WebSocket error`, 'system')
-    }
-
     document.getElementById('room-form').addEventListener('submit', (e) => {
       e.preventDefault()
       const room = document.getElementById('room-input').value.trim()
       if (!room || ws.readyState !== WebSocket.OPEN) return
-      ws.send(`Room name: ${room}`)                                       
+      roomName = room                       
+      ws.send(`Room name: ${roomName}`)
       document.getElementById('room-form').style.display = 'none'
       document.getElementById('input').focus()
     })
@@ -81,7 +107,8 @@
       e.preventDefault()
       const name = document.getElementById('name-input').value.trim()
       if (!name) return
-      ws.send(`Name: ${name}`)                                       
+      userName = name                       
+      ws.send(`Name: ${userName}`)
       document.getElementById('name-form').style.display = 'none'
       document.getElementById('chat-form').style.display = 'flex'
       document.getElementById('input').focus()
@@ -94,6 +121,8 @@
         input.value = ''
       }
     })
+
+    connect()
   </script>
 </body>
 </html>
