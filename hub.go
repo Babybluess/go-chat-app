@@ -1,44 +1,57 @@
 package main
 
+import (
+	"fmt"
+)
+
 type Hub struct {
-	clients    map[*Client]bool
-	broadcast  chan []byte
+	clients    map[string]map[*Client]bool
+	broadcast  chan Message
 	register   chan *Client
 	unregister chan *Client
 }
 
+type Message struct {
+	room string
+	data []byte
+	name string
+}
+
 func newHub() *Hub {
 	return &Hub{
-		clients:    make(map[*Client]bool),
-		broadcast:  make(chan []byte),
+		clients:    make(map[string]map[*Client]bool),
+		broadcast:  make(chan Message),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 	}
 }
 
-// Run processes all Hub events sequentially in a single goroutine.
-// This is the central concurrency guarantee of the whole system.
 func (h *Hub) Run() {
 	for {
 		select {
 		case client := <-h.register:
-			h.clients[client] = true
+			if h.clients[client.room] == nil {
+				h.clients[client.room] = make(map[*Client]bool)
+			}
+			h.clients[client.room][client] = true
 
 		case client := <-h.unregister:
-			if _, ok := h.clients[client]; ok {
-				delete(h.clients, client)
-				close(client.send) // signals writePump to exit
+			room := h.clients[client.room]
+			if _, ok := room[client]; ok {
+				delete(room, client)
+				close(client.send)
+				if len(room) == 0 {
+					delete(h.clients, client.room)
+				}
 			}
 
-		case message := <-h.broadcast:
-			for client := range h.clients {
+		case msg := <-h.broadcast:
+			for client := range h.clients[msg.room] {
 				select {
-				case client.send <- message:
-					// queued successfully
+				case client.send <- []byte(fmt.Sprintf("%s: %s", msg.name, msg.data)):
 				default:
-					// send buffer full — client is too slow, drop it
 					close(client.send)
-					delete(h.clients, client)
+					delete(h.clients[msg.room], client)
 				}
 			}
 		}

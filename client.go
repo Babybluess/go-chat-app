@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"strings"
 )
 
 const (
@@ -18,21 +19,22 @@ const (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	// In production, check r.Header.Get("Origin") here
-	CheckOrigin: func(r *http.Request) bool { return true },
+	CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
 type Client struct {
 	hub  *Hub
 	conn *websocket.Conn
-	send chan []byte // buffered channel of outbound messages
+	send chan []byte
+	name string
+	room string
 }
 
-// readPump pumps messages from the WebSocket connection to the Hub.
-// One goroutine per client runs readPump.
 func (c *Client) readPump() {
 	defer func() {
-		c.hub.unregister <- c
+		if c.room != "" {
+			c.hub.unregister <- c
+		}
 		c.conn.Close()
 	}()
 
@@ -46,19 +48,25 @@ func (c *Client) readPump() {
 	for {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err,
-				websocket.CloseGoingAway,
-				websocket.CloseAbnormalClosure) {
-				log.Printf("ws read error: %v", err)
-			}
 			break
 		}
-		c.hub.broadcast <- message
+
+		if c.room == "" && strings.Contains(string(message), "Room name:") {
+			index := strings.Index(string(message), " ")
+			c.room = strings.TrimSpace(string(message)[index+1:])
+			c.hub.register <- c
+			continue
+		}
+		if c.name == "" && strings.Contains(string(message), "Name:") {
+			index := strings.Index(string(message), " ")
+			c.name = strings.TrimSpace(string(message)[index+1:])
+			c.hub.register <- c
+			continue
+		}
+		c.hub.broadcast <- Message{room: c.room, data: message, name: c.name}
 	}
 }
 
-// writePump pumps messages from the Hub's send channel to the WebSocket.
-// One goroutine per client runs writePump.
 func (c *Client) writePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
@@ -82,7 +90,6 @@ func (c *Client) writePump() {
 			}
 			w.Write(message)
 
-			// Flush any queued messages in the same write — saves syscalls
 			n := len(c.send)
 			for i := 0; i < n; i++ {
 				w.Write([]byte{'\n'})
@@ -101,7 +108,6 @@ func (c *Client) writePump() {
 	}
 }
 
-// serveWs upgrades the HTTP connection and launches the client goroutines.
 func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -114,7 +120,6 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		conn: conn,
 		send: make(chan []byte, 256),
 	}
-	client.hub.register <- client
 
 	go client.writePump()
 	go client.readPump()
