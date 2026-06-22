@@ -11,7 +11,13 @@ var addr = flag.String("addr", ":8080", "http service address")
 func main() {
 	flag.Parse()
 
-	hub := newHub()
+	config, err := GetConfig()
+	if err != nil {
+		log.Fatal("DATABASE_URL env var not set")
+	}
+	store := newStore(config.DB_URL)
+
+	hub := newHub(store)
 	go hub.Run()
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

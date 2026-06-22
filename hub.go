@@ -9,6 +9,7 @@ type Hub struct {
 	broadcast  chan Message
 	register   chan *Client
 	unregister chan *Client
+	store      *Store
 }
 
 type Message struct {
@@ -17,12 +18,13 @@ type Message struct {
 	name string
 }
 
-func newHub() *Hub {
+func newHub(store *Store) *Hub {
 	return &Hub{
 		clients:    make(map[string]map[*Client]bool),
 		broadcast:  make(chan Message),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
+		store:      store,
 	}
 }
 
@@ -35,6 +37,15 @@ func (h *Hub) Run() {
 			}
 			h.clients[client.room][client] = true
 
+			if client.room != "" && client.name != "" {
+				for _, msg := range h.store.History(client.room, historyLimit) {
+					select {
+					case client.send <- msg:
+					default:
+					}
+				}
+			}
+
 		case client := <-h.unregister:
 			room := h.clients[client.room]
 			if _, ok := room[client]; ok {
@@ -46,6 +57,7 @@ func (h *Hub) Run() {
 			}
 
 		case msg := <-h.broadcast:
+			h.store.Save(msg.room, msg.name, string(msg.data))
 			for client := range h.clients[msg.room] {
 				select {
 				case client.send <- []byte(fmt.Sprintf("%s: %s", msg.name, msg.data)):
