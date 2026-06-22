@@ -13,11 +13,13 @@ func main() {
 
 	config, err := GetConfig()
 	if err != nil {
-		log.Fatal("DATABASE_URL env var not set")
+		log.Fatal("config load:", err)
 	}
-	store := newStore(config.DB_URL)
 
-	hub := newHub(store)
+	store := newStore(config.DB_URL)
+	pubsub := newPubSub(config.REDIS_ADDR)
+
+	hub := newHub(store, pubsub)
 	go hub.Run()
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

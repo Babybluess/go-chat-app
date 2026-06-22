@@ -7,7 +7,8 @@ import (
 )
 
 type Config struct {
-	DB_URL string
+	DB_URL     string
+	REDIS_ADDR string
 }
 
 func GetConfig() (Config, error) {
@@ -16,6 +17,7 @@ func GetConfig() (Config, error) {
 	}
 
 	return Config{
-		DB_URL: os.Getenv("DATABASE_URL"),
+		DB_URL:     os.Getenv("DATABASE_URL"),
+		REDIS_ADDR: os.Getenv("REDIS_ADDR"),
 	}, nil
 }
